@@ -12,9 +12,10 @@ Free multi-platform downloader: TikTok (no watermark), Instagram, Facebook — a
 | Instagram Downloader | Python service (`instaloader`) |
 | Facebook Downloader | Python service (`yt-dlp`) |
 | TikTok Downloader | tikwm.com API (free, no key) |
+| Thumbnail Proxy | Next.js `/api/proxy` route |
 | Styling | Custom CSS (light/dark mode) |
 | Ads | Google AdSense ready |
-| API Protection | Internal Secret Key |
+| API Protection | Internal Secret Key (`x-api-secret`) |
 
 ***
 
@@ -28,11 +29,13 @@ savedown/
 │   ├── globals.css           ← Design system + all styles
 │   └── api/
 │       ├── tiktok/
-│       │   └── route.js      ← TikTok API (tikwm.com, gratis)
+│       │   └── route.js      ← TikTok API (tikwm.com)
 │       ├── instagram/
 │       │   └── route.js      ← Instagram API → proxy ke Python service
-│       └── facebook/
-│           └── route.js      ← Facebook API → proxy ke Python service
+│       ├── facebook/
+│       │   └── route.js      ← Facebook API → proxy ke Python service
+│       └── proxy/
+│           └── route.js      ← Proxy thumbnail CDN Instagram/Facebook
 ├── python-service/
 │   └── service.py            ← Flask server: Instagram + Facebook downloader
 ├── .env.local                ← API keys (jangan di-commit)
@@ -60,17 +63,13 @@ Saat ditanya:
 
 Copy semua file dari zip ini ke folder `savedown/`, replace file yang sudah ada.
 
-### 3. Install Dependencies Next.js
+### 3. Install Dependencies
 
 ```bash
 npm install axios
 ```
 
-> Package `@tobyg74/tiktok-api-dl` dan `instagram-url-direct` sudah **tidak dipakai** — diganti dengan tikwm.com API dan Python service.
-
 ### 4. Setup Python Service
-
-Install Python dependencies:
 
 ```bash
 cd python-service
@@ -83,13 +82,11 @@ Jalankan service:
 # Development
 python service.py
 
-# Production (pakai gunicorn)
+# Production
 gunicorn -w 4 -b 0.0.0.0:5001 service:app
 ```
 
-Service berjalan di `http://localhost:5001`
-
-Update yt-dlp secara rutin agar tidak error:
+Service berjalan di `http://localhost:5001`. Update yt-dlp secara rutin:
 
 ```bash
 yt-dlp -U
@@ -111,15 +108,10 @@ Edit `.env.local`:
 
 ```env
 # URL Python service (ganti IP jika deploy ke VPS)
-INSTAGRAM_SERVICE_URL=http://localhost:5001
+SERVICE_URL=http://localhost:5001
 
 # Internal API Secret — lindungi API dari akses luar
-# Generate dengan: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 NEXT_PUBLIC_INTERNAL_API_SECRET=isi_hasil_generate_di_sini
-
-# RapidAPI key (opsional — hanya sebagai fallback Instagram)
-# Daftar gratis di rapidapi.com
-RAPIDAPI_KEY=your_rapidapi_key_here
 ```
 
 ### 6. Jalankan Lokal
@@ -146,13 +138,12 @@ npm install -g vercel
 vercel
 ```
 
-Tambahkan environment variable di **Vercel Dashboard → Project Settings → Environment Variables**:
+Tambahkan di **Vercel Dashboard → Project Settings → Environment Variables**:
 
 | Key | Value |
 |---|---|
-| `INSTAGRAM_SERVICE_URL` | `http://YOUR_VPS_IP:5001` |
+| `SERVICE_URL` | `http://YOUR_VPS_IP:5001` |
 | `NEXT_PUBLIC_INTERNAL_API_SECRET` | key yang sama dengan `.env.local` |
-| `RAPIDAPI_KEY` | key RapidAPI kamu (opsional) |
 
 ### Python Service → VPS
 
@@ -160,7 +151,6 @@ Tambahkan environment variable di **Vercel Dashboard → Project Settings → En
 # Di VPS (Ubuntu/Debian)
 pip install flask instaloader yt-dlp gunicorn
 
-# Upload python-service/service.py ke VPS
 # Jalankan dengan PM2
 npm install -g pm2
 pm2 start "gunicorn -w 4 -b 0.0.0.0:5001 service:app" --name savedown-service
@@ -168,7 +158,7 @@ pm2 save
 pm2 startup
 ```
 
-Pastikan port `5001` terbuka di firewall VPS:
+Buka port di firewall:
 
 ```bash
 ufw allow 5001
@@ -178,7 +168,7 @@ ufw allow 5001
 
 ## API Endpoints
 
-Semua endpoint diproteksi dengan `x-api-secret` header. Request tanpa header yang valid akan mendapat response `403 Forbidden`.
+Semua endpoint diproteksi `x-api-secret` header. Request tanpa header valid → `403 Forbidden`.
 
 ### TikTok
 
@@ -186,8 +176,7 @@ Semua endpoint diproteksi dengan `x-api-secret` header. Request tanpa header yan
 GET /api/tiktok?url={URL}&type={video|story|audio}
 ```
 
-- Provider: **tikwm.com** (gratis, tanpa API key)
-- Fallback: TikTok internal API
+- Provider: tikwm.com (gratis, tanpa API key)
 - Support: video no watermark, story, audio MP3
 
 ### Instagram
@@ -196,9 +185,8 @@ GET /api/tiktok?url={URL}&type={video|story|audio}
 GET /api/instagram?url={URL}&type={post|reels|story}
 ```
 
-- Provider: **Python service** → `instaloader`
+- Provider: Python service → `instaloader`
 - Support: Post, Reel, Carousel, Story (publik)
-- Private post: butuh session cookie (lihat bagian Instagram Login di bawah)
 
 ### Facebook
 
@@ -206,96 +194,59 @@ GET /api/instagram?url={URL}&type={post|reels|story}
 GET /api/facebook?url={URL}&type={video|photo}
 ```
 
-- Provider: **Python service** → `yt-dlp`
-- Support: Video, Reel, Watch (publik)
-- Output: multi resolusi (360p, 480p, 720p, 1080p)
+- Provider: Python service → `yt-dlp`
+- Support: Video, Reel, Watch (publik), multi resolusi
+
+### Proxy Thumbnail
+
+```
+GET /api/proxy?url={CDN_URL}
+```
+
+- Digunakan internal oleh frontend
+- Mem-proxy thumbnail dari CDN Instagram/Facebook yang diblokir browser
+- Hanya mengizinkan domain `cdninstagram.com` dan `fbcdn.net`
 
 ***
 
 ## Proteksi API (Internal Secret Key)
 
-API dilindungi dengan secret key agar tidak bisa diakses sembarang orang dari luar website.
+Setiap request dari frontend menyertakan header `x-api-secret`. API route memvalidasi header ini — jika tidak cocok, request ditolak `403 Forbidden`.
 
-### Cara Kerja
-
-Setiap request dari frontend mengirim header `x-api-secret`. API route memvalidasi header ini — jika tidak cocok, request ditolak dengan `403 Forbidden`.
-
-
-### Penggunaan di `route.js`
-
-```javascript
-import { checkApiSecret } from '@/app/lib/apiGuard';
-
-export async function GET(request) {
-  if (!checkApiSecret(request)) {
-    return Response.json({ error: 'Forbidden' }, { status: 403 });
-  }
-  // ... lanjut kode download
-}
-```
-
-### Penggunaan di `page.js` (Frontend)
-
-```javascript
-const res = await fetch(`/api/tiktok?url=${encodeURIComponent(url)}&type=${type}`, {
-  headers: {
-    'x-api-secret': process.env.NEXT_PUBLIC_INTERNAL_API_SECRET,
-  },
-});
-```
 
 ### Test Proteksi
 
 ```bash
-# Harus dapat 403
-curl https://savedown.anjartech.my.id/api/tiktok?url=xxx
+# Harus 403 — tanpa secret
+curl -i "https://savedown.anjartech.my.id/api/tiktok?url=test"
 
-# Harus jalan normal
-curl -H "x-api-secret: YOUR_SECRET" https://savedown.anjartech.my.id/api/tiktok?url=xxx
+# Harus lolos — dengan secret benar
+curl -i -H "x-api-secret: YOUR_SECRET" "https://savedown.anjartech.my.id/api/tiktok?url=test"
+
+# Harus 403 — secret salah
+curl -i -H "x-api-secret: wrongkey" "https://savedown.anjartech.my.id/api/tiktok?url=test"
 ```
-
-***
-
-## Instagram Login (Opsional, untuk Private Post)
-
-Untuk download post privat, buat akun Instagram dummy lalu login di `service.py`:
-
-```python
-# Di python-service/service.py, uncomment baris ini:
-L.login("your_username", "your_password")
-```
-
-> **Penting:** Jangan pakai akun Instagram utama. Gunakan akun khusus/dummy.
-
-Session akan di-cache otomatis oleh instaloader. Jika kena checkpoint, login ulang atau ganti akun.
-
-***
 
 ## AdSense Setup
 
 1. Daftar di [adsense.google.com](https://adsense.google.com)
-2. Tambahkan URL website kamu
-3. Buka `app/layout.js` — uncomment blok AdSense script
+2. Tambahkan URL website
+3. Buka `app/layout.js` → uncomment blok AdSense script
 4. Ganti `ca-pub-XXXX` dengan Publisher ID kamu
 5. Ganti placeholder ad slot di `app/page.js` dengan unit iklan dari dashboard AdSense
 
 Wajib ada sebelum apply AdSense:
-- Halaman **Privacy Policy**
-- Halaman **Terms of Service**
-- Konten original yang cukup
+- Halaman Privacy Policy
+- Halaman Terms of Service
 
 ***
 
 ## Update Dependencies
 
 ```bash
-# Update yt-dlp (lakukan rutin, minimal 1x seminggu)
+# Wajib rutin (minimal 1x seminggu)
 yt-dlp -U
-
-# Update instaloader
 pip install --upgrade instaloader
-
-# Update npm packages
 npm update
 ```
 
@@ -305,13 +256,12 @@ npm update
 
 | Error | Penyebab | Solusi |
 |---|---|---|
-| `Forbidden` (403) | Request tanpa secret key | Pastikan `NEXT_PUBLIC_INTERNAL_API_SECRET` sama di `.env.local` dan Vercel |
+| `403 Forbidden` | Request tanpa / salah secret key | Pastikan `NEXT_PUBLIC_INTERNAL_API_SECRET` sama di `.env.local` dan Vercel |
+| Thumbnail tidak muncul | CDN Instagram/Facebook diblokir browser | Pastikan `app/api/proxy/route.js` sudah ada |
 | `Empty response from service` | Python service tidak jalan | Jalankan `python service.py` |
-| `Session expired` | Cookie Instagram expired | Update session di `service.py` |
 | `yt-dlp failed` | yt-dlp outdated | Jalankan `yt-dlp -U` |
-| `Post is private` | Konten privat | Login Instagram di service.py |
+| `Post is private` | Konten privat | Login Instagram di `service.py` |
 | `API error 500` TikTok | tikwm.com down | Otomatis fallback ke internal API |
-| `RAPIDAPI_KEY not set` | Env tidak diset | Isi `.env.local` atau biarkan (opsional) |
 
 ***
 
