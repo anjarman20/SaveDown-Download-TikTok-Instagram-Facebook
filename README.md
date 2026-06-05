@@ -14,6 +14,7 @@ Free multi-platform downloader: TikTok (no watermark), Instagram, Facebook — a
 | TikTok Downloader | tikwm.com API (free, no key) |
 | Styling | Custom CSS (light/dark mode) |
 | Ads | Google AdSense ready |
+| API Protection | Internal Secret Key |
 
 ***
 
@@ -100,11 +101,21 @@ yt-dlp -U
 cp .env.local.example .env.local
 ```
 
+Generate internal API secret key:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
 Edit `.env.local`:
 
 ```env
 # URL Python service (ganti IP jika deploy ke VPS)
 INSTAGRAM_SERVICE_URL=http://localhost:5001
+
+# Internal API Secret — lindungi API dari akses luar
+# Generate dengan: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+NEXT_PUBLIC_INTERNAL_API_SECRET=isi_hasil_generate_di_sini
 
 # RapidAPI key (opsional — hanya sebagai fallback Instagram)
 # Daftar gratis di rapidapi.com
@@ -140,6 +151,7 @@ Tambahkan environment variable di **Vercel Dashboard → Project Settings → En
 | Key | Value |
 |---|---|
 | `INSTAGRAM_SERVICE_URL` | `http://YOUR_VPS_IP:5001` |
+| `NEXT_PUBLIC_INTERNAL_API_SECRET` | key yang sama dengan `.env.local` |
 | `RAPIDAPI_KEY` | key RapidAPI kamu (opsional) |
 
 ### Python Service → VPS
@@ -148,7 +160,7 @@ Tambahkan environment variable di **Vercel Dashboard → Project Settings → En
 # Di VPS (Ubuntu/Debian)
 pip install flask instaloader yt-dlp gunicorn
 
-# Clone / upload python-service/service.py ke VPS
+# Upload python-service/service.py ke VPS
 # Jalankan dengan PM2
 npm install -g pm2
 pm2 start "gunicorn -w 4 -b 0.0.0.0:5001 service:app" --name savedown-service
@@ -165,6 +177,8 @@ ufw allow 5001
 ***
 
 ## API Endpoints
+
+Semua endpoint diproteksi dengan `x-api-secret` header. Request tanpa header yang valid akan mendapat response `403 Forbidden`.
 
 ### TikTok
 
@@ -195,6 +209,50 @@ GET /api/facebook?url={URL}&type={video|photo}
 - Provider: **Python service** → `yt-dlp`
 - Support: Video, Reel, Watch (publik)
 - Output: multi resolusi (360p, 480p, 720p, 1080p)
+
+***
+
+## Proteksi API (Internal Secret Key)
+
+API dilindungi dengan secret key agar tidak bisa diakses sembarang orang dari luar website.
+
+### Cara Kerja
+
+Setiap request dari frontend mengirim header `x-api-secret`. API route memvalidasi header ini — jika tidak cocok, request ditolak dengan `403 Forbidden`.
+
+
+### Penggunaan di `route.js`
+
+```javascript
+import { checkApiSecret } from '@/app/lib/apiGuard';
+
+export async function GET(request) {
+  if (!checkApiSecret(request)) {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  // ... lanjut kode download
+}
+```
+
+### Penggunaan di `page.js` (Frontend)
+
+```javascript
+const res = await fetch(`/api/tiktok?url=${encodeURIComponent(url)}&type=${type}`, {
+  headers: {
+    'x-api-secret': process.env.NEXT_PUBLIC_INTERNAL_API_SECRET,
+  },
+});
+```
+
+### Test Proteksi
+
+```bash
+# Harus dapat 403
+curl https://savedown.anjartech.my.id/api/tiktok?url=xxx
+
+# Harus jalan normal
+curl -H "x-api-secret: YOUR_SECRET" https://savedown.anjartech.my.id/api/tiktok?url=xxx
+```
 
 ***
 
@@ -247,6 +305,7 @@ npm update
 
 | Error | Penyebab | Solusi |
 |---|---|---|
+| `Forbidden` (403) | Request tanpa secret key | Pastikan `NEXT_PUBLIC_INTERNAL_API_SECRET` sama di `.env.local` dan Vercel |
 | `Empty response from service` | Python service tidak jalan | Jalankan `python service.py` |
 | `Session expired` | Cookie Instagram expired | Update session di `service.py` |
 | `yt-dlp failed` | yt-dlp outdated | Jalankan `yt-dlp -U` |

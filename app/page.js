@@ -50,6 +50,21 @@ const IconInfo = () => (
   </svg>
 );
 
+// ─── Helper: proxy thumbnail CDN Instagram/Facebook ───────────────────────────
+function proxiedUrl(url) {
+  if (!url) return null;
+  const needsProxy =
+    url.includes('cdninstagram.com') ||
+    url.includes('fbcdn.net') ||
+    url.includes('scontent') ||
+    url.includes('instagram.com/') ||
+    url.includes('facebook.com/');
+  if (needsProxy) {
+    return `/api/proxy?url=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
+
 // ─── Platform config ──────────────────────────────────────────────────────────
 const PLATFORMS = [
   {
@@ -103,11 +118,22 @@ const Spinner = () => (
 // ─── Result Card ──────────────────────────────────────────────────────────────
 function ResultCard({ data, platform }) {
   const [activeVideo, setActiveVideo] = useState(null);
+  const [thumbError, setThumbError] = useState(false);
   const videoRef = useRef(null);
 
   if (!data) return null;
 
   const { title, author, thumbnail, duration, downloads = [] } = data;
+
+  const firstVideo = downloads.find(d => d.type === 'video');
+  const firstImage = downloads.find(d => d.type === 'image');
+
+  // Tentukan src thumbnail terbaik
+  // Untuk Instagram/Facebook: proxy dulu agar tidak diblokir browser
+  const thumbSrc = proxiedUrl(thumbnail);
+
+  // Fallback: jika thumbnail gagal & ada image download, pakai itu
+  const fallbackThumb = firstImage ? proxiedUrl(firstImage.url) : null;
 
   const handleVideoPreview = (url) => {
     setActiveVideo(activeVideo === url ? null : url);
@@ -131,18 +157,53 @@ function ResultCard({ data, platform }) {
               <IconX />
             </button>
           </div>
-        ) : thumbnail ? (
+        ) : (thumbSrc && !thumbError) ? (
           <div className="thumb-wrap">
-            <img src={thumbnail} alt={title || 'Media preview'} className="thumb-img" loading="lazy" />
-            {downloads.find(d => d.type === 'video') && (
+            <img
+              src={thumbSrc}
+              alt={title || 'Media preview'}
+              className="thumb-img"
+              loading="lazy"
+              onError={(e) => {
+                // Jika proxy juga gagal, coba fallback image download langsung
+                if (fallbackThumb && e.target.src !== fallbackThumb) {
+                  e.target.src = fallbackThumb;
+                } else {
+                  setThumbError(true);
+                }
+              }}
+            />
+            {firstVideo && (
               <button
                 className="play-overlay"
-                onClick={() => handleVideoPreview(downloads.find(d => d.type === 'video')?.url)}
+                onClick={() => handleVideoPreview(firstVideo.url)}
                 aria-label="Preview video"
               >
                 <IconPlay />
               </button>
             )}
+            {duration && <span className="duration-badge">{duration}</span>}
+          </div>
+        ) : firstVideo ? (
+          // Tidak ada thumbnail tapi ada video — tampilkan video langsung
+          <div className="thumb-wrap">
+            <video
+              src={firstVideo.url}
+              className="thumb-img"
+              style={{ objectFit: 'cover', cursor: 'pointer' }}
+              onClick={() => handleVideoPreview(firstVideo.url)}
+              muted
+              playsInline
+              preload="metadata"
+              onError={() => {}}
+            />
+            <button
+              className="play-overlay"
+              onClick={() => handleVideoPreview(firstVideo.url)}
+              aria-label="Preview video"
+            >
+              <IconPlay />
+            </button>
             {duration && <span className="duration-badge">{duration}</span>}
           </div>
         ) : (
@@ -243,7 +304,11 @@ function DownloaderPanel({ platform }) {
     }
     setLoading(true);
     try {
-      const res = await fetch(`/api/${platform.id}?url=${encodeURIComponent(trimmed)}&type=${activeType}`);
+      const res = await fetch(`/api/${platform.id}?url=${encodeURIComponent(trimmed)}&type=${activeType}`, {
+        headers: {
+          'x-api-secret': process.env.NEXT_PUBLIC_INTERNAL_API_SECRET,
+        },
+      });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || `Server error ${res.status}`);
       setResult(data);
