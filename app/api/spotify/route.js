@@ -8,7 +8,7 @@ export async function GET(request) {
   const url = searchParams.get('url');
   if (!url) return Response.json({ error: 'Missing url' }, { status: 400 });
 
-  const serviceUrl = process.env.INSTAGRAM_SERVICE_URL || 'http://localhost:5001';
+  const serviceUrl = process.env.SERVICE_URL || 'http://localhost:5001';
 
   try {
     const res = await fetch(
