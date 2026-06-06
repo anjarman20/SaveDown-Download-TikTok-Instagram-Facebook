@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 
-// ─── Icons (inline SVG components) ───────────────────────────────────────────
+// ─── Icons ────────────────────────────────────────────────────────────────────
 const IconDownload = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -49,6 +49,11 @@ const IconInfo = () => (
     <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
   </svg>
 );
+const IconMusic = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+  </svg>
+);
 
 // ─── Helper: proxy thumbnail CDN Instagram/Facebook ───────────────────────────
 function proxiedUrl(url) {
@@ -59,9 +64,7 @@ function proxiedUrl(url) {
     url.includes('scontent') ||
     url.includes('instagram.com/') ||
     url.includes('facebook.com/');
-  if (needsProxy) {
-    return `/api/proxy?url=${encodeURIComponent(url)}`;
-  }
+  if (needsProxy) return `/api/proxy?url=${encodeURIComponent(url)}`;
   return url;
 }
 
@@ -105,13 +108,44 @@ const PLATFORMS = [
     color: '#1877f2',
     validate: (url) => url.includes('facebook.com') || url.includes('fb.watch'),
   },
+  {
+    id: 'youtube',
+    label: 'YouTube',
+    placeholder: 'https://www.youtube.com/watch?v=... or youtu.be/...',
+    hint: 'Paste a YouTube video, Short, or music URL here',
+    types: [
+      { id: 'video', label: 'Video (MP4)' },
+      { id: 'audio', label: 'Audio (MP3)' },
+      { id: 'shorts', label: 'Shorts' },
+    ],
+    color: '#ff0000',
+    validate: (url) =>
+      url.includes('youtube.com') || url.includes('youtu.be'),
+  },
+  {
+    id: 'spotify',
+    label: 'Spotify',
+    placeholder: 'https://open.spotify.com/track/...',
+    hint: 'Spotify → Share → Copy link to track → paste here (single track only)',
+    types: [
+      { id: 'track', label: 'Track (MP3)' },
+    ],
+    color: '#1db954',
+    validate: (url) => url.includes('spotify.com') || url.includes('spotify:'),
+  },
 ];
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
-const Spinner = () => (
+const Spinner = ({ platform }) => (
   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '2rem 0', color: 'var(--muted)' }}>
     <div className="spinner" />
-    <span style={{ fontSize: '0.875rem' }}>Fetching media info...</span>
+    <span style={{ fontSize: '0.875rem' }}>
+      {platform === 'spotify'
+        ? 'Searching track on YouTube Music...'
+        : platform === 'youtube'
+        ? 'Fetching video info...'
+        : 'Fetching media info...'}
+    </span>
   </div>
 );
 
@@ -123,21 +157,16 @@ function ResultCard({ data, platform }) {
 
   if (!data) return null;
 
-  const { title, author, thumbnail, duration, downloads = [] } = data;
-
+  const { title, author, album, thumbnail, duration, downloads = [] } = data;
   const firstVideo = downloads.find(d => d.type === 'video');
+  const firstAudio = downloads.find(d => d.type === 'audio');
   const firstImage = downloads.find(d => d.type === 'image');
 
-  // Tentukan src thumbnail terbaik
-  // Untuk Instagram/Facebook: proxy dulu agar tidak diblokir browser
   const thumbSrc = proxiedUrl(thumbnail);
-
-  // Fallback: jika thumbnail gagal & ada image download, pakai itu
   const fallbackThumb = firstImage ? proxiedUrl(firstImage.url) : null;
+  const isAudioOnly = downloads.length > 0 && downloads.every(d => d.type === 'audio');
 
-  const handleVideoPreview = (url) => {
-    setActiveVideo(activeVideo === url ? null : url);
-  };
+  const handleVideoPreview = (url) => setActiveVideo(activeVideo === url ? null : url);
 
   return (
     <div className="result-card fade-in">
@@ -145,17 +174,25 @@ function ResultCard({ data, platform }) {
       <div className="preview-area">
         {activeVideo ? (
           <div className="video-player-wrap">
-            <video
-              ref={videoRef}
-              src={activeVideo}
-              controls
-              autoPlay
-              className="video-player"
-              onError={() => setActiveVideo(null)}
-            />
-            <button className="close-video-btn" onClick={() => setActiveVideo(null)} aria-label="Close preview">
-              <IconX />
-            </button>
+            <video ref={videoRef} src={activeVideo} controls autoPlay className="video-player" onError={() => setActiveVideo(null)} />
+            <button className="close-video-btn" onClick={() => setActiveVideo(null)} aria-label="Close preview"><IconX /></button>
+          </div>
+        ) : isAudioOnly ? (
+          // Audio-only preview (Spotify / YouTube audio)
+          <div className="audio-preview-wrap">
+            {thumbSrc && !thumbError ? (
+              <img
+                src={thumbSrc}
+                alt={title || 'Cover'}
+                className="audio-cover"
+                onError={() => setThumbError(true)}
+              />
+            ) : (
+              <div className="audio-cover-placeholder"><IconMusic /></div>
+            )}
+            {firstAudio && (
+              <audio controls src={firstAudio.url} className="audio-player" onError={() => {}} />
+            )}
           </div>
         ) : (thumbSrc && !thumbError) ? (
           <div className="thumb-wrap">
@@ -165,7 +202,6 @@ function ResultCard({ data, platform }) {
               className="thumb-img"
               loading="lazy"
               onError={(e) => {
-                // Jika proxy juga gagal, coba fallback image download langsung
                 if (fallbackThumb && e.target.src !== fallbackThumb) {
                   e.target.src = fallbackThumb;
                 } else {
@@ -174,34 +210,23 @@ function ResultCard({ data, platform }) {
               }}
             />
             {firstVideo && (
-              <button
-                className="play-overlay"
-                onClick={() => handleVideoPreview(firstVideo.url)}
-                aria-label="Preview video"
-              >
+              <button className="play-overlay" onClick={() => handleVideoPreview(firstVideo.url)} aria-label="Preview video">
                 <IconPlay />
               </button>
             )}
             {duration && <span className="duration-badge">{duration}</span>}
           </div>
         ) : firstVideo ? (
-          // Tidak ada thumbnail tapi ada video — tampilkan video langsung
           <div className="thumb-wrap">
             <video
               src={firstVideo.url}
               className="thumb-img"
               style={{ objectFit: 'cover', cursor: 'pointer' }}
               onClick={() => handleVideoPreview(firstVideo.url)}
-              muted
-              playsInline
-              preload="metadata"
+              muted playsInline preload="metadata"
               onError={() => {}}
             />
-            <button
-              className="play-overlay"
-              onClick={() => handleVideoPreview(firstVideo.url)}
-              aria-label="Preview video"
-            >
+            <button className="play-overlay" onClick={() => handleVideoPreview(firstVideo.url)} aria-label="Preview video">
               <IconPlay />
             </button>
             {duration && <span className="duration-badge">{duration}</span>}
@@ -216,7 +241,7 @@ function ResultCard({ data, platform }) {
       {/* Info & Downloads */}
       <div className="result-info">
         {title && <h3 className="result-title">{title.slice(0, 100)}{title.length > 100 ? '...' : ''}</h3>}
-        {author && <p className="result-author">by {author}</p>}
+        {author && <p className="result-author">by {author}{album ? ` · ${album}` : ''}</p>}
 
         <div className="download-grid">
           {downloads.map((item, i) => (
@@ -224,7 +249,7 @@ function ResultCard({ data, platform }) {
           ))}
           {downloads.length === 0 && (
             <p style={{ fontSize: '0.875rem', color: 'var(--muted)', gridColumn: '1/-1' }}>
-              No download links found. The content may be private.
+              No download links found. The content may be private or unavailable.
             </p>
           )}
         </div>
@@ -236,16 +261,49 @@ function ResultCard({ data, platform }) {
 function DownloadItem({ item, index, onPreview, activeVideo }) {
   const isPrimary = index === 0;
   const isVideo = item.type === 'video';
+  const [merging, setMerging] = useState(false);
+  const [mergeUrl, setMergeUrl] = useState(null);
+  const [mergeError, setMergeError] = useState('');
+
+  const handleMergeDownload = async () => {
+    setMerging(true);
+    setMergeError('');
+    try {
+      // Trigger merge — ini akan makan waktu 1-3 menit
+      const res = await fetch(item.url, {
+        headers: { 'x-api-secret': process.env.NEXT_PUBLIC_INTERNAL_API_SECRET }
+      });
+      if (!res.ok) throw new Error('Merge failed. Try again.');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setMergeUrl(url);
+      // Auto-trigger download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `video_${item.quality || 'hd'}.mp4`;
+      a.click();
+    } catch (e) {
+      setMergeError(e.message);
+    } finally {
+      setMerging(false);
+    }
+  };
 
   return (
     <div className="download-item">
       <div className="download-item-label">
         <span className="dl-label-text">{item.label}</span>
-        {item.size && <span className="dl-size">{item.size}</span>}
         {item.quality && <span className="dl-quality">{item.quality}</span>}
+        {item.isMergeUrl && !merging && !mergeUrl && (
+          <span className="dl-merge-badge">HD+Audio</span>
+        )}
+        {merging && <span className="dl-merge-badge merging">Merging… may take 1-3 min</span>}
       </div>
+
+      {mergeError && <p className="dl-merge-error">{mergeError}</p>}
+
       <div className="dl-actions">
-        {isVideo && (
+        {isVideo && !item.isMergeUrl && (
           <button
             className={`btn-action btn-preview ${activeVideo === item.url ? 'active' : ''}`}
             onClick={() => onPreview(item.url)}
@@ -253,16 +311,29 @@ function DownloadItem({ item, index, onPreview, activeVideo }) {
             {activeVideo === item.url ? 'Hide' : 'Preview'}
           </button>
         )}
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`btn-action btn-download ${isPrimary ? 'btn-download--primary' : ''}`}
-          download
-        >
-          <IconDownload />
-          Download
-        </a>
+
+        {item.isMergeUrl ? (
+          <button
+            className={`btn-action btn-download ${isPrimary ? 'btn-download--primary' : ''}`}
+            onClick={handleMergeDownload}
+            disabled={merging}
+          >
+            {merging
+              ? <><div className="btn-spinner" /> Merging...</>
+              : <><IconDownload /> Download</>
+            }
+          </button>
+        ) : (
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`btn-action btn-download ${isPrimary ? 'btn-download--primary' : ''}`}
+            download
+          >
+            <IconDownload /> Download
+          </a>
+        )}
       </div>
     </div>
   );
@@ -304,11 +375,10 @@ function DownloaderPanel({ platform }) {
     }
     setLoading(true);
     try {
-      const res = await fetch(`/api/${platform.id}?url=${encodeURIComponent(trimmed)}&type=${activeType}`, {
-        headers: {
-          'x-api-secret': process.env.NEXT_PUBLIC_INTERNAL_API_SECRET,
-        },
-      });
+      const res = await fetch(
+        `/api/${platform.id}?url=${encodeURIComponent(trimmed)}&type=${activeType}`,
+        { headers: { 'x-api-secret': process.env.NEXT_PUBLIC_INTERNAL_API_SECRET } }
+      );
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || `Server error ${res.status}`);
       setResult(data);
@@ -321,6 +391,14 @@ function DownloaderPanel({ platform }) {
 
   return (
     <div className="panel">
+      {/* Spotify warning */}
+      {platform.id === 'spotify' && (
+        <div className="info-banner">
+          <IconInfo />
+          <span>Track tunggal saja. Proses mungkin 10–20 detik karena mencari source dari YouTube Music.</span>
+        </div>
+      )}
+
       {/* Type selector */}
       <div className="type-row">
         {platform.types.map(t => (
@@ -353,9 +431,7 @@ function DownloaderPanel({ platform }) {
       </div>
 
       {/* Hint */}
-      <p className="hint-text">
-        <IconInfo /> {platform.hint}
-      </p>
+      <p className="hint-text"><IconInfo /> {platform.hint}</p>
 
       {/* Error */}
       {error && (
@@ -365,7 +441,7 @@ function DownloaderPanel({ platform }) {
       )}
 
       {/* Loading */}
-      {loading && <Spinner />}
+      {loading && <Spinner platform={platform.id} />}
 
       {/* Result */}
       {!loading && result && <ResultCard data={result} platform={platform.id} />}
@@ -376,11 +452,12 @@ function DownloaderPanel({ platform }) {
 // ─── FAQ ──────────────────────────────────────────────────────────────────────
 const FAQS = [
   { q: 'Is this service free?', a: 'Yes, completely free. No registration, no hidden fees.' },
-  { q: 'How do I download TikTok without watermark?', a: 'Select the TikTok tab, choose "Video (No Watermark)", paste the link, and click Fetch. The downloaded file will have no TikTok watermark.' },
+  { q: 'How do I download TikTok without watermark?', a: 'Select the TikTok tab, choose "Video (No Watermark)", paste the link, and click Fetch.' },
+  { q: 'Can I download YouTube videos?', a: 'Yes. Paste any YouTube video or Shorts URL, choose Video (MP4) or Audio (MP3), then click Fetch.' },
+  { q: 'How does Spotify download work?', a: 'SaveDown finds the matching audio from YouTube Music based on the Spotify track metadata, then lets you download it as MP3. Only single tracks are supported.' },
   { q: 'Can I download private Instagram content?', a: 'Only publicly accessible content can be downloaded. Private accounts or stories require the original account to be public.' },
   { q: 'Why does the download link expire?', a: 'Download links are generated on-demand by the platform CDN and typically expire within a few hours. Simply re-fetch the URL to get a fresh link.' },
-  { q: 'What quality can I download?', a: 'SaveDown fetches the highest available quality from each platform — typically 720p to 1080p for TikTok/Instagram Reels, and HD/SD for Facebook videos.' },
-  { q: 'Is it legal to download these videos?', a: 'Downloading for personal offline viewing is generally acceptable. Re-uploading, distributing, or monetizing without the creator\'s consent may violate copyright law and platform ToS.' },
+  { q: 'Is it legal to download these videos?', a: "Downloading for personal offline viewing is generally acceptable. Re-uploading or monetizing without the creator's consent may violate copyright law and platform ToS." },
 ];
 
 function FAQ() {
@@ -388,9 +465,7 @@ function FAQ() {
   return (
     <section className="section section--alt" id="faq">
       <div className="container">
-        <div className="section-header">
-          <h2>Frequently Asked Questions</h2>
-        </div>
+        <div className="section-header"><h2>Frequently Asked Questions</h2></div>
         <div className="faq-list">
           {FAQS.map((f, i) => (
             <div key={i} className={`faq-item ${open === i ? 'open' : ''}`}>
@@ -418,7 +493,6 @@ export default function Page() {
 
   return (
     <>
-      {/* HEADER */}
       <header className="header">
         <div className="header-inner">
           <a href="/" className="logo">
@@ -444,47 +518,35 @@ export default function Page() {
       </header>
 
       <main>
-        {/* HERO + DOWNLOADER */}
         <section className="hero">
           <div className="container">
             <div className="hero-text">
               <span className="badge">Free · No Watermark · No Sign-up</span>
               <h1>Download from Any Social Platform</h1>
               <p className="hero-sub">
-                TikTok videos without watermark, Instagram posts, reels, stories, and Facebook videos — all in one place.
+                TikTok, Instagram, Facebook, YouTube, and Spotify — download videos, reels, stories, and music all in one place.
               </p>
             </div>
 
-            {/* Ad slot — leaderboard top */}
             <div className="ad-slot ad-slot--728">
-              {/* <ins className="adsbygoogle" style={{display:'block'}} data-ad-client="ca-pub-XXXX" data-ad-slot="XXXX" data-ad-format="auto" data-full-width-responsive="true"></ins> */}
               <span className="ad-label">Advertisement</span>
             </div>
 
-            {/* Downloader card */}
             <div className="downloader-card">
               <div className="platform-tabs" role="tablist">
                 {PLATFORMS.map(p => (
-                  <PlatformTab
-                    key={p.id}
-                    platform={p}
-                    active={activePlatform.id === p.id}
-                    onClick={() => setActivePlatform(p)}
-                  />
+                  <PlatformTab key={p.id} platform={p} active={activePlatform.id === p.id} onClick={() => setActivePlatform(p)} />
                 ))}
               </div>
               <DownloaderPanel key={activePlatform.id} platform={activePlatform} />
             </div>
 
-            {/* Ad slot — rectangle */}
             <div className="ad-slot ad-slot--rect">
-              {/* <ins className="adsbygoogle" style={{display:'block'}} data-ad-client="ca-pub-XXXX" data-ad-slot="XXXX" data-ad-format="rectangle"></ins> */}
               <span className="ad-label">Advertisement</span>
             </div>
           </div>
         </section>
 
-        {/* PLATFORMS */}
         <section className="section section--alt" id="platforms">
           <div className="container">
             <div className="section-header">
@@ -493,22 +555,21 @@ export default function Page() {
             </div>
             <div className="platforms-grid">
               {[
-                { name: 'TikTok', color: '#e2175c', items: ['Videos without watermark (HD)', 'Stories', 'Audio / MP3 extraction', 'Slideshows'] },
-                { name: 'Instagram', color: '#c13584', items: ['Posts (single & carousel)', 'Reels (up to 1080p)', 'Stories (photo & video)', 'IGTV'] },
-                { name: 'Facebook', color: '#1877f2', items: ['Video posts (HD & SD)', 'Reels', 'Photo posts', 'Public page videos'] },
+                { name: 'TikTok', color: '#e2175c', items: ['Videos without watermark (HD)', 'Stories', 'Audio / MP3 extraction'] },
+                { name: 'Instagram', color: '#c13584', items: ['Posts (single & carousel)', 'Reels (up to 1080p)', 'Stories (photo & video)'] },
+                { name: 'Facebook', color: '#1877f2', items: ['Video posts (HD & SD)', 'Reels', 'Public page videos'] },
+                { name: 'YouTube', color: '#ff0000', items: ['Videos up to 1080p (MP4)', 'Shorts', 'Audio extraction (MP3)'] },
+                { name: 'Spotify', color: '#1db954', items: ['Single track (MP3)', 'Full metadata (title, artist, cover)', 'Matched from YouTube Music'] },
               ].map(pl => (
                 <div key={pl.name} className="platform-card" style={{ '--pc': pl.color }}>
                   <h3 style={{ color: pl.color }}>{pl.name}</h3>
-                  <ul>
-                    {pl.items.map(it => <li key={it}>{it}</li>)}
-                  </ul>
+                  <ul>{pl.items.map(it => <li key={it}>{it}</li>)}</ul>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* HOW IT WORKS */}
         <section className="section" id="how-to">
           <div className="container">
             <div className="section-header">
@@ -519,32 +580,26 @@ export default function Page() {
               {[
                 { n: '1', title: 'Copy the URL', desc: 'Open the app, find the content, tap Share, then "Copy Link".' },
                 { n: '2', title: 'Paste & Fetch', desc: 'Select the platform tab, paste the URL, and press Fetch.' },
-                { n: '3', title: 'Preview & Download', desc: 'Preview the video or photo, choose your quality, and download.' },
+                { n: '3', title: 'Preview & Download', desc: 'Preview the video or audio, choose your quality, and download.' },
               ].map(s => (
                 <div key={s.n} className="step">
                   <div className="step-num">{s.n}</div>
-                  <div>
-                    <h3>{s.title}</h3>
-                    <p>{s.desc}</p>
-                  </div>
+                  <div><h3>{s.title}</h3><p>{s.desc}</p></div>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* Ad between sections */}
         <div className="container">
           <div className="ad-slot ad-slot--728">
             <span className="ad-label">Advertisement</span>
           </div>
         </div>
 
-        {/* FAQ */}
         <FAQ />
       </main>
 
-      {/* FOOTER */}
       <footer className="footer">
         <div className="container">
           <p>© {new Date().getFullYear()} SaveDown. For personal use only. Respect content creators. Created by Anjar</p>
