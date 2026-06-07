@@ -108,31 +108,6 @@ const PLATFORMS = [
     color: '#1877f2',
     validate: (url) => url.includes('facebook.com') || url.includes('fb.watch'),
   },
-  {
-    id: 'youtube',
-    label: 'YouTube',
-    placeholder: 'https://www.youtube.com/watch?v=... or youtu.be/...',
-    hint: 'Paste a YouTube video, Short, or music URL here',
-    types: [
-      { id: 'video', label: 'Video (MP4)' },
-      { id: 'audio', label: 'Audio (MP3)' },
-      { id: 'shorts', label: 'Shorts' },
-    ],
-    color: '#ff0000',
-    validate: (url) =>
-      url.includes('youtube.com') || url.includes('youtu.be'),
-  },
-  {
-    id: 'spotify',
-    label: 'Spotify',
-    placeholder: 'https://open.spotify.com/track/...',
-    hint: 'Spotify → Share → Copy link to track → paste here (single track only)',
-    types: [
-      { id: 'track', label: 'Track (MP3)' },
-    ],
-    color: '#1db954',
-    validate: (url) => url.includes('spotify.com') || url.includes('spotify:'),
-  },
 ];
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
